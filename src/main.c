@@ -87,6 +87,7 @@ void IRAM_ATTR gpio_isr_handler(void *arg) {
 
 void mpu6050_task(void *arg) {
     while (1) {
+        ESP_LOGI(TAG, "mpu6050 task");
         // Wait for the semaphore indicating data is ready
         if (xSemaphoreTake(data_ready_semaphore, portMAX_DELAY)) {
             // Read accelerometer and gyroscope data
@@ -105,6 +106,7 @@ void mpu6050_task(void *arg) {
             // Optionally apply complementary filter
             ESP_ERROR_CHECK(mpu6050_complimentory_filter(mpu6050, &sensor_data.acceleration, &sensor_data.gyro, &sensor_data.angles));
         }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
 
