@@ -23,7 +23,7 @@
 /**
  * @brief The enum for the drive direction.
  */
-typedef const enum{
+typedef enum{
     resvere,
     forward,
     neutral,
