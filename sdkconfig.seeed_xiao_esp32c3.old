@@ -502,7 +502,7 @@ CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 #
 # TWAI Configuration
 #
-# CONFIG_TWAI_ISR_IN_IRAM is not set
+CONFIG_TWAI_ISR_IN_IRAM=y
 CONFIG_TWAI_ERRATA_FIX_LISTEN_ONLY_DOM=y
 # end of TWAI Configuration
 
@@ -574,7 +574,7 @@ CONFIG_GPTIMER_ISR_HANDLER_IN_IRAM=y
 #
 # I2C Configuration
 #
-# CONFIG_I2C_ISR_IRAM_SAFE is not set
+CONFIG_I2C_ISR_IRAM_SAFE=y
 # CONFIG_I2C_ENABLE_DEBUG_LOG is not set
 # end of I2C Configuration
 # end of Driver Configurations

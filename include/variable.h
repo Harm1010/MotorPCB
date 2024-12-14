@@ -4,8 +4,6 @@
 /**
  * @file variable.h
  * @brief The file contains all the variables' definitions which are used in the program.
- * @author Wataru Yoshida
- * @date 2021/10/19
  * @details This file contains the definitions of the variables used in the program. The variables include the control commands, sensor data, and CAN message.
  */
 #include <stdio.h>
@@ -20,49 +18,30 @@
 #include "mpu6050.h"
 
 
-/**
- * @brief The enum for the drive direction.
- */
-typedef enum{
+typedef enum {
     resvere,
     forward,
     neutral,
 } drive_direction_t;
 
-/**
- * @brief The struct for the control commands.
- */
-struct control
-{    
+typedef struct {    
+    uint8_t throttle;   // 0-255
     drive_direction_t drive_mode;
-    uint8_t throttle;
+    bool sdrive_enable;
+} control_t;
 
-}control;
+typedef struct {   
+    double odometer;                    // cm
+    uint16_t speed;                     // mm/s
+    mpu6050_acce_value_t acceleration;  // mm/s^2
+    mpu6050_gyro_value_t gyro;          
+    mpu6050_temp_value_t temp;          // °C
+    complimentary_angle_t angles;       // °
+} sensor_data_t;
 
-/**
- * @brief The struct for the sensor data.
- */
-struct sensor_data
-{   
-    uint8_t mpu6050_deviceid;
-    double odometer;   //cm
-    double angle[3];  //degree
-    mpu6050_acce_value_t acceleration; //mm/s^2
-    uint16_t speed;  //mm/s
-    mpu6050_gyro_value_t gyro;
-    complimentary_angle_t angles;
-    mpu6050_temp_value_t temp; 
+// Declare variables as external
+extern control_t control;
+extern sensor_data_t sensor_data;
 
-}sensor_data;
-
-/**
- * @brief The struct for the CAN message.
- */
-struct CAN_message
-{
-    uint32_t id;
-    uint8_t data[8];
-
-}CAN_message;
 
 #endif

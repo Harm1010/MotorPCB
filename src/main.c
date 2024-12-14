@@ -11,41 +11,79 @@
 #include "driver/i2c_master.h"
 #include "driver/i2c_slave.h"
 #include "driver/i2c.h"
-#include "mpu6050.h"
+#include "driver/twai.h"
 #include "unity.h"
 
+#include "mpu6050.h"
 #include "variable.h"
+#include "can.h"
 
-#define I2C_MASTER_SCL_IO 26      /*!< gpio number for I2C master clock */
-#define I2C_MASTER_SDA_IO 25      /*!< gpio number for I2C master data  */
+#define I2C_MASTER_SCL_IO GPIO_NUM_7    /*!< gpio number for I2C master clock */
+#define I2C_MASTER_SDA_IO GPIO_NUM_6    /*!< gpio number for I2C master data  */
 #define I2C_MASTER_NUM I2C_NUM_0  /*!< I2C port number for master dev */
 #define I2C_MASTER_FREQ_HZ 100000 /*!< I2C master clock frequency */
 
-#define MCP4551_I2C_ADDRESS 0x58
+#define MCP4551_I2C_ADDRESS 0x2Eu
+#define MCP4551_CMD_VOLATILE_WIPER 0x00u  // Command to write to the volatile wiper
+#define MCP4551_CMD_NON_VOLATILE_WIPER 0x02u  // Command to write to the non-volatile wiper
 
 static const char *TAG = "mpu6050 test";
 static mpu6050_handle_t mpu6050 = NULL;
 
-SemaphoreHandle_t data_ready_semaphore;
+// Define and initialize the global variables
+control_t control = {
+    .drive_mode = neutral,
+    .throttle = 0,
+    .sdrive_enable = false
+};
+
+sensor_data_t sensor_data = {
+    .odometer = 0.0,
+    .speed = 0,
+    .acceleration = {
+        .acce_x = 0.0f,
+        .acce_y = 0.0f,
+        .acce_z = 0.0f
+    },
+    .gyro = {
+        .gyro_x = 0.0f,
+        .gyro_y = 0.0f,
+        .gyro_z = 0.0f
+    },
+    .temp = {
+        .temp = 0.0f
+    },
+    .angles = {
+        .roll = 0.0f,
+        .pitch = 0.0f
+    }
+};
 
 
-static void i2c_bus_init(void)
-{
-    i2c_config_t conf;
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = (gpio_num_t)I2C_MASTER_SDA_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_io_num = (gpio_num_t)I2C_MASTER_SCL_IO;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
-    conf.clk_flags = I2C_SCLK_SRC_FLAG_FOR_NOMAL;
+
+static void i2c_bus_init(void) {
+
+    ESP_LOGI(TAG, "Configuring I2C bus...");
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = I2C_MASTER_FREQ_HZ
+    };
 
     esp_err_t ret = i2c_param_config(I2C_MASTER_NUM, &conf);
-    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ret, "I2C config returned error");
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C config failed: %s", esp_err_to_name(ret));
+    }
 
     ret = i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
-    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ret, "I2C install returned error");
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C driver install failed: %s", esp_err_to_name(ret));
+    }
 }
+
 
 /**
  * @brief i2c master initialization and sensor mpu6050 initialization
@@ -54,187 +92,183 @@ static void i2c_bus_init(void)
  * Then configure the sensor mpu6050 with the range of accelerometer and gyroscope.
  * Finally wake up the sensor mpu6050 and start to measure the values.
  */
-static void i2c_sensor_mpu6050_init(void)
+static void i2c_sensor_mpu6050_init(void) {
+
+    ESP_LOGI(TAG, "Initializing MPU6050...");
+
+
+    ESP_LOGI(TAG, "Creating MPU6050 instance...");
+    mpu6050 = mpu6050_create(I2C_MASTER_NUM, MPU6050_I2C_ADDRESS);
+    if (mpu6050 == NULL) {
+        ESP_LOGE(TAG, "MPU6050 instance creation failed");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Configuring MPU6050...");
+    esp_err_t ret = mpu6050_config(mpu6050, ACCE_FS_4G, GYRO_FS_500DPS);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MPU6050 configuration failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Waking up MPU6050...");
+    ret = mpu6050_wake_up(mpu6050);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "MPU6050 wake-up failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "MPU6050 initialization complete.");
+}
+
+
+esp_err_t mcp4551_write(uint8_t i2c_address, uint8_t command, uint8_t value)
 {
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     esp_err_t ret;
 
-    // Initialize the I2C bus
-    i2c_bus_init();
+    // Start I2C communication
+    ret = i2c_master_start(cmd);
+    if (ret != ESP_OK) {
+        ESP_LOGE("MCP4551", "I2C start failed: %s", esp_err_to_name(ret));
+        i2c_cmd_link_delete(cmd);
+        return ret;
+    }
 
-    // Create an MPU6050 sensor handle
-    mpu6050 = mpu6050_create(I2C_MASTER_NUM, MPU6050_I2C_ADDRESS);
-    TEST_ASSERT_NOT_NULL_MESSAGE(mpu6050, "MPU6050 create returned NULL");
+    // Send the device address with write flag
+    ret = i2c_master_write_byte(cmd, (i2c_address << 1) | I2C_MASTER_WRITE, true);
+    if (ret != ESP_OK) {
+        ESP_LOGE("MCP4551", "I2C address write failed: %s", esp_err_to_name(ret));
+        i2c_cmd_link_delete(cmd);
+        return ret;
+    }
 
-    // Configure the MPU6050 sensor with accelerometer and gyroscope settings
-    ret = mpu6050_config(mpu6050, ACCE_FS_4G, GYRO_FS_500DPS);
-    TEST_ASSERT_EQUAL(ESP_OK, ret);
+    // Send the command byte (with memory address and operation)
+    ret = i2c_master_write_byte(cmd, command << 4, true);
+    if (ret != ESP_OK) {
+        ESP_LOGE("MCP4551", "Command byte write failed: %s", esp_err_to_name(ret));
+        i2c_cmd_link_delete(cmd);
+        return ret;
+    }
 
-    // Wake up the MPU6050 sensor
-    ret = mpu6050_wake_up(mpu6050);
-    TEST_ASSERT_EQUAL(ESP_OK, ret);
+    // Send the data byte (wiper value)
+    ret = i2c_master_write_byte(cmd, value, true);
+    if (ret != ESP_OK) {
+        ESP_LOGE("MCP4551", "Data byte write failed: %s", esp_err_to_name(ret));
+        i2c_cmd_link_delete(cmd);
+        return ret;
+    }
+
+    // Stop I2C communication
+    ret = i2c_master_stop(cmd);
+    if (ret != ESP_OK) {
+        ESP_LOGE("MCP4551", "I2C stop failed: %s", esp_err_to_name(ret));
+    }
+
+    // Execute the command link
+    ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, 1000 / portTICK_PERIOD_MS);
+    if (ret != ESP_OK) {
+        ESP_LOGE("MCP4551", "I2C command execution failed: %s", esp_err_to_name(ret));
+    }
+
+    // Delete the command link
+    i2c_cmd_link_delete(cmd);
+
+    return ret;
 }
+
 
 /**
  * @brief mpu6050 task
  *
  * This task is used to read the mpu6050 data and print it.
  */
-
-void IRAM_ATTR gpio_isr_handler(void *arg) {
-    // Give the semaphore when the interrupt occurs
-    xSemaphoreGiveFromISR(data_ready_semaphore, NULL);
-}
-
 void mpu6050_task(void *arg) {
+
+    i2c_sensor_mpu6050_init();
+
     while (1) {
         ESP_LOGI(TAG, "mpu6050 task");
         // Wait for the semaphore indicating data is ready
-        if (xSemaphoreTake(data_ready_semaphore, portMAX_DELAY)) {
-            // Read accelerometer and gyroscope data
-            ESP_ERROR_CHECK(mpu6050_get_acce(mpu6050, &sensor_data.acceleration));
-            ESP_LOGI(TAG, "acce_x: %.2f, acce_y: %.2f, acce_z: %.2f",
-                     sensor_data.acceleration.acce_x,
-                     sensor_data.acceleration.acce_y,
-                     sensor_data.acceleration.acce_z);
+        // Read accelerometer and gyroscope data
+        ESP_ERROR_CHECK(mpu6050_get_acce(mpu6050, &sensor_data.acceleration));
+        ESP_LOGI(TAG, "acce_x: %.2f, acce_y: %.2f, acce_z: %.2f",
+             sensor_data.acceleration.acce_x,
+             sensor_data.acceleration.acce_y,
+             sensor_data.acceleration.acce_z);
 
-            ESP_ERROR_CHECK(mpu6050_get_gyro(mpu6050, &sensor_data.gyro));
-            ESP_LOGI(TAG, "gyro_x: %.2f, gyro_y: %.2f, gyro_z: %.2f",
-                     sensor_data.gyro.gyro_x,
-                     sensor_data.gyro.gyro_y,
-                     sensor_data.gyro.gyro_z);
+        ESP_ERROR_CHECK(mpu6050_get_gyro(mpu6050, &sensor_data.gyro));
+        ESP_LOGI(TAG, "gyro_x: %.2f, gyro_y: %.2f, gyro_z: %.2f",
+             sensor_data.gyro.gyro_x,
+             sensor_data.gyro.gyro_y,
+             sensor_data.gyro.gyro_z);
 
-            // Optionally apply complementary filter
-            ESP_ERROR_CHECK(mpu6050_complimentory_filter(mpu6050, &sensor_data.acceleration, &sensor_data.gyro, &sensor_data.angles));
-        }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        // Optionally apply complementary filter
+        ESP_ERROR_CHECK(mpu6050_complimentory_filter(mpu6050, &sensor_data.acceleration, &sensor_data.gyro, &sensor_data.angles));
+
+        ESP_LOGI(TAG, "roll: %.2f, pitch: %.2f", 
+             sensor_data.angles.roll,
+             sensor_data.angles.pitch); 
+             
+             
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
+
+   
 }
+
 
 /**
  * @brief mcp4551 task
  *
  * This task is used to send control value to MCP4551.
  */
-// static void mcp4551_task(void *arg)
-// {   
-//     control.drive_mode = neutral;
-
-//     uint8_t value;
-//     while (1) {
-//         switch (control.drive_mode) {
-//             case forward:
-//                 value = 128 + control.throttle;
-//                 if (value > 255) {
-//                     value = 255;
-//                 }
-//                 break;
-//             case resvere:
-//                 value = 128 - control.throttle;
-//                 if (value < 0) {
-//                     value = 0;
-//                 }
-//                 break;
-//             case neutral:
-//                 value = 128;
-//                 break;
-//         }
-//         mcp4551_write(MCP4551_I2C_ADDRESS, value);
-//         vTaskDelay(1000 / portTICK_PERIOD_MS);
-//     }
-// }
-
+void mcp4551_task(void *arg) { 
     
-void app_main(void) {
-    // Create a semaphore
-    data_ready_semaphore = xSemaphoreCreateBinary();
-    if (data_ready_semaphore == NULL) {
-        ESP_LOGE(TAG, "Failed to create semaphore");
-        return;
+    uint8_t wiper_value = 128;
+    control.drive_mode = neutral;
+
+    while (1) {
+        switch (control.drive_mode) {
+            case forward:
+                wiper_value = 128 + (control.throttle / 2);
+                break;
+            case resvere:
+                wiper_value = 128 - (control.throttle / 2);
+                break;
+            case neutral:
+                wiper_value = 128;
+                break;
+        }
+        mcp4551_write(MCP4551_I2C_ADDRESS, MCP4551_CMD_VOLATILE_WIPER, wiper_value);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
+}
 
-    // Configure MPU6050 interrupt
-    mpu6050_int_config_t mpu_int_config = {
-        .interrupt_pin = GPIO_NUM_10,
-        .pin_mode = INTERRUPT_PIN_OPEN_DRAIN,
-        .active_level = INTERRUPT_PIN_ACTIVE_LOW,
-        .interrupt_latch = INTERRUPT_LATCH_50US,
-        .interrupt_clear_behavior = INTERRUPT_CLEAR_ON_ANY_READ
-    };
-    ESP_ERROR_CHECK(mpu6050_config_interrupts(mpu6050, &mpu_int_config));
+void app_main(void) {
 
-    // Install GPIO interrupt handler
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_NEGEDGE,  // Trigger on falling edge
-        .pin_bit_mask = (1ULL << GPIO_NUM_10),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE
-    };
-    gpio_config(&io_conf);
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(GPIO_NUM_10, gpio_isr_handler, NULL);
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
 
-
-
-    //master config
-    i2c_master_bus_config_t i2c_mst_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_MASTER_NUM,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = false,
-    };
-
-
-
-    i2c_device_config_t mpu6050_dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = 0x60,
-        .scl_speed_hz = 100000,
-    };
-
-    i2c_device_config_t mcp4551_dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = 0x58,
-        .scl_speed_hz = 100000,
-    };
-    //slaves config
-
-    //MPU6050 config
-    i2c_slave_config_t i2c_slv_config_mpu6050 = {
-        .addr_bit_len = I2C_ADDR_BIT_LEN_7,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_MASTER_NUM,
-        .send_buf_depth = 256,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .slave_addr = 0x58,
-    };
-
-    //MCP4551 config
-    i2c_slave_config_t i2c_slv_config_mcp4551 = {
-        .addr_bit_len = I2C_ADDR_BIT_LEN_7,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .i2c_port = I2C_MASTER_NUM,
-        .send_buf_depth = 256,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .slave_addr = 0x58,
-    };
-
-    i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));   
-    
-    i2c_master_dev_handle_t dev_handle;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &mpu6050_dev_cfg, &dev_handle));
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &mcp4551_dev_cfg, &dev_handle));
-
-    i2c_slave_dev_handle_t slave_handle;
-    ESP_ERROR_CHECK(i2c_new_slave_device(&i2c_slv_config_mpu6050, &slave_handle));
-    ESP_ERROR_CHECK(i2c_new_slave_device(&i2c_slv_config_mcp4551, &slave_handle));
-
-
+    i2c_bus_init();
     // Create the task
     xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 10, NULL);
+
+    xTaskCreate(mcp4551_task, "mcp4551_task", 2048, NULL, 10, NULL);
+
+    xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
+
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    control.drive_mode = forward;
+    control.throttle = 50;
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    control.drive_mode = resvere;
+    control.throttle = 50;
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    control.drive_mode = neutral;
+
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    test_can();
+
+    
 
 }
