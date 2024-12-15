@@ -96,7 +96,6 @@ static void i2c_sensor_mpu6050_init(void) {
 
     ESP_LOGI(TAG, "Initializing MPU6050...");
 
-
     ESP_LOGI(TAG, "Creating MPU6050 instance...");
     mpu6050 = mpu6050_create(I2C_MASTER_NUM, MPU6050_I2C_ADDRESS);
     if (mpu6050 == NULL) {
@@ -245,19 +244,50 @@ void mcp4551_task(void *arg) {
     }
 }
 
+void sdrive_enable_task(void *arg) {
+    bool sdrive_enabled = false;
+    // Configure GPIO 5 as output
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << 5),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf);
+
+    while (1) {
+        if (control.sdrive_enable != sdrive_enabled) {
+            sdrive_enabled = control.sdrive_enable;
+            if (sdrive_enabled) {
+                gpio_set_level(GPIO_NUM_5, 1); // Turn GPIO 5 ON
+                ESP_LOGI(TAG, "sdrive enabled, GPIO 5 ON");
+            } else {
+                gpio_set_level(GPIO_NUM_5, 0); // Turn GPIO 5 OFF
+                ESP_LOGI(TAG, "sdrive disabled, GPIO 5 OFF");
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(50)); // Delay for 100ms
+    }
+}
+
 void app_main(void) {
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
 
     i2c_bus_init();
     // Create the task
-    xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 10, NULL);
+    //xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 8, NULL);
+
+    xTaskCreate(sdrive_enable_task, "sdrive_enable_task", 2048, NULL, 9, NULL);
 
     xTaskCreate(mcp4551_task, "mcp4551_task", 2048, NULL, 10, NULL);
 
-    xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
+    //xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
+    control.sdrive_enable = true;
     control.drive_mode = forward;
     control.throttle = 50;
     vTaskDelay(10000 / portTICK_PERIOD_MS);
@@ -265,6 +295,7 @@ void app_main(void) {
     control.throttle = 50;
     vTaskDelay(5000 / portTICK_PERIOD_MS);
     control.drive_mode = neutral;
+    control.sdrive_enable = false;
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
     test_can();
