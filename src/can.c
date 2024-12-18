@@ -230,85 +230,93 @@ void twai_control_task(void *arg)
 }
 
 void can_sensor_task(void *arg)
-{
+{   
+
     twai_message_t rx_msg;
     twai_message_t tx_msg;
+    
+    ESP_ERROR_CHECK(twai_driver_install(&g_config, &t_config, &f_config));
+    ESP_ERROR_CHECK(twai_start());
+    ESP_LOGI(EXAMPLE_TAG, "Driver started");
     
     while (1) {
         // Receive control messages
         if (twai_receive(&rx_msg, pdMS_TO_TICKS(100)) == ESP_OK) {
             if (rx_msg.identifier == ID_CONTROL_MSG) {
                 // Parse control message
-                control.drive_mode = rx_msg.data[0];
-                control.throttle = rx_msg.data[1];
-                control.sdrive_enable = rx_msg.data[2];
+                control.throttle = rx_msg.data[0];
+                control.sdrive_enable = rx_msg.data[1] & 0x01;
+                control.drive_mode = (rx_msg.data[1] >> 1) & 0x03;
                 
                 ESP_LOGI(TAG, "Received control - Mode: %d, Throttle: %d, Enable: %d",
                     control.drive_mode, control.throttle, control.sdrive_enable);
             }
         }
 
-        // Send accelerometer data
-        tx_msg.identifier = ID_MPU_ACCEL_MSG;
-        tx_msg.extd = 0;
-        tx_msg.rtr = 0;
-        tx_msg.ss = 0;
-        tx_msg.self = 0;
-        tx_msg.dlc_non_comp = 0;
-        tx_msg.data_length_code = 6;
-        
-        // Pack accelerometer data (2 bytes each for x, y, z)
-        int16_t accel_x = (int16_t)(sensor_data.acceleration.acce_x * 100); // Scale by 100 for 2 decimal places
-        int16_t accel_y = (int16_t)(sensor_data.acceleration.acce_y * 100);
-        int16_t accel_z = (int16_t)(sensor_data.acceleration.acce_z * 100);
-        
-        tx_msg.data[0] = (uint8_t)(accel_x >> 8);
-        tx_msg.data[1] = (uint8_t)(accel_x);
-        tx_msg.data[2] = (uint8_t)(accel_y >> 8);
-        tx_msg.data[3] = (uint8_t)(accel_y);
-        tx_msg.data[4] = (uint8_t)(accel_z >> 8);
-        tx_msg.data[5] = (uint8_t)(accel_z);
-        
-        ESP_LOGI(TAG, "Sending accelerometer data - x: %d, y: %d, z: %d", accel_x, accel_y, accel_z);
-        twai_transmit(&tx_msg, pdMS_TO_TICKS(100));
+        static uint32_t last_send_time = 0;
+        uint32_t curr_time = xTaskGetTickCount();
+        if ((curr_time - last_send_time) >= 1000) {
+            last_send_time = curr_time;
 
-        // Send gyroscope data
-        tx_msg.identifier = ID_MPU_GYRO_MSG;
-        tx_msg.data_length_code = 6;
-        
-        // Pack gyroscope data (2 bytes each for x, y, z)
-        int16_t gyro_x = (int16_t)(sensor_data.gyro.gyro_x * 100);
-        int16_t gyro_y = (int16_t)(sensor_data.gyro.gyro_y * 100);
-        int16_t gyro_z = (int16_t)(sensor_data.gyro.gyro_z * 100);
-        
-        tx_msg.data[0] = (uint8_t)(gyro_x >> 8);
-        tx_msg.data[1] = (uint8_t)(gyro_x);
-        tx_msg.data[2] = (uint8_t)(gyro_y >> 8);
-        tx_msg.data[3] = (uint8_t)(gyro_y);
-        tx_msg.data[4] = (uint8_t)(gyro_z >> 8);
-        tx_msg.data[5] = (uint8_t)(gyro_z);
-        
-        ESP_LOGI(TAG, "Sending gyroscope data - x: %d, y: %d, z: %d", gyro_x, gyro_y, gyro_z);
-        twai_transmit(&tx_msg, pdMS_TO_TICKS(100));
+            // Send accelerometer data
+            tx_msg.identifier = ID_MPU_ACCEL_MSG;
+            tx_msg.extd = 0;
+            tx_msg.rtr = 0;
+            tx_msg.ss = 0;
+            tx_msg.self = 0;
+            tx_msg.dlc_non_comp = 0;
+            tx_msg.data_length_code = 6;
+            
+            // Pack accelerometer data (2 bytes each for x, y, z)
+            int16_t accel_x = (int16_t)(sensor_data.acceleration.acce_x * 100); // Scale by 100 for 2 decimal places
+            int16_t accel_y = (int16_t)(sensor_data.acceleration.acce_y * 100);
+            int16_t accel_z = (int16_t)(sensor_data.acceleration.acce_z * 100);
+            
+            tx_msg.data[0] = (uint8_t)(accel_x >> 8);
+            tx_msg.data[1] = (uint8_t)(accel_x);
+            tx_msg.data[2] = (uint8_t)(accel_y >> 8);
+            tx_msg.data[3] = (uint8_t)(accel_y);
+            tx_msg.data[4] = (uint8_t)(accel_z >> 8);
+            tx_msg.data[5] = (uint8_t)(accel_z);
+            
+            ESP_LOGI(TAG, "Sending accelerometer data - x: %d, y: %d, z: %d", accel_x, accel_y, accel_z);
+            twai_transmit(&tx_msg, pdMS_TO_TICKS(100));
 
-        // Send filtered angle data
-        tx_msg.identifier = ID_MPU_ANGLE_MSG;
-        tx_msg.data_length_code = 4;
-        
-        // Pack angle data (2 bytes each for roll and pitch)
-        int16_t roll = (int16_t)(sensor_data.angles.roll * 100);
-        int16_t pitch = (int16_t)(sensor_data.angles.pitch * 100);
-        
-        tx_msg.data[0] = (uint8_t)(roll >> 8);
-        tx_msg.data[1] = (uint8_t)(roll);
-        tx_msg.data[2] = (uint8_t)(pitch >> 8);
-        tx_msg.data[3] = (uint8_t)(pitch);
-        
-        ESP_LOGI(TAG, "Sending filtered angle data - roll: %d, pitch: %d", roll, pitch);
-        twai_transmit(&tx_msg, pdMS_TO_TICKS(100));
+            // Send gyroscope data
+            tx_msg.identifier = ID_MPU_GYRO_MSG;
+            tx_msg.data_length_code = 6;
+            
+            // Pack gyroscope data (2 bytes each for x, y, z)
+            int16_t gyro_x = (int16_t)(sensor_data.gyro.gyro_x * 100);
+            int16_t gyro_y = (int16_t)(sensor_data.gyro.gyro_y * 100);
+            int16_t gyro_z = (int16_t)(sensor_data.gyro.gyro_z * 100);
+            
+            tx_msg.data[0] = (uint8_t)(gyro_x >> 8);
+            tx_msg.data[1] = (uint8_t)(gyro_x);
+            tx_msg.data[2] = (uint8_t)(gyro_y >> 8);
+            tx_msg.data[3] = (uint8_t)(gyro_y);
+            tx_msg.data[4] = (uint8_t)(gyro_z >> 8);
+            tx_msg.data[5] = (uint8_t)(gyro_z);
+            
+            ESP_LOGI(TAG, "Sending gyroscope data - x: %d, y: %d, z: %d", gyro_x, gyro_y, gyro_z);
+            twai_transmit(&tx_msg, pdMS_TO_TICKS(100));
 
-        // Delay before next iteration
-        vTaskDelay(pdMS_TO_TICKS(500)); // 20Hz update rate
+            // Send filtered angle data
+            tx_msg.identifier = ID_MPU_ANGLE_MSG;
+            tx_msg.data_length_code = 4;
+            
+            // Pack angle data (2 bytes each for roll and pitch)
+            int16_t roll = (int16_t)(sensor_data.angles.roll * 100);
+            int16_t pitch = (int16_t)(sensor_data.angles.pitch * 100);
+            
+            tx_msg.data[0] = (uint8_t)(roll >> 8);
+            tx_msg.data[1] = (uint8_t)(roll);
+            tx_msg.data[2] = (uint8_t)(pitch >> 8);
+            tx_msg.data[3] = (uint8_t)(pitch);
+            
+            ESP_LOGI(TAG, "Sending filtered angle data - roll: %d, pitch: %d", roll, pitch);
+            twai_transmit(&tx_msg, pdMS_TO_TICKS(100));
+        }
     }
 }
 

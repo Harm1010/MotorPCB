@@ -275,16 +275,25 @@ void sdrive_enable_task(void *arg) {
 void app_main(void) {
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
-
+    gpio_config_t io_conf2 = {
+        .pin_bit_mask = (1ULL << 10),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&io_conf2);
+    gpio_set_level(GPIO_NUM_10, 0); // Turn GPIO 10 OFF
+    
     i2c_bus_init();
     // Create the task
-    //xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 8, NULL);
+    xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 8, NULL);
 
     xTaskCreate(sdrive_enable_task, "sdrive_enable_task", 2048, NULL, 9, NULL);
 
     xTaskCreate(mcp4551_task, "mcp4551_task", 2048, NULL, 10, NULL);
 
-    //xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
+    xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
     control.sdrive_enable = true;
@@ -298,7 +307,7 @@ void app_main(void) {
     control.sdrive_enable = false;
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
-    test_can();
+    //test_can();
 
     
 

@@ -19,9 +19,9 @@
 
 
 typedef enum {
-    resvere,
-    forward,
     neutral,
+    forward,
+    resvere,
 } drive_direction_t;
 
 typedef struct {    
