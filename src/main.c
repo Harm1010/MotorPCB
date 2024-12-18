@@ -13,6 +13,9 @@
 #include "driver/i2c.h"
 #include "driver/twai.h"
 #include "unity.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 
 #include "mpu6050.h"
 #include "variable.h"
@@ -230,10 +233,10 @@ void mcp4551_task(void *arg) {
     while (1) {
         switch (control.drive_mode) {
             case forward:
-                wiper_value = 127 + (control.throttle / 2);
+                wiper_value = 128 + (control.throttle / 2);
                 break;
             case resvere:
-                wiper_value = 127 - (control.throttle / 2);
+                wiper_value = 128 - (control.throttle / 2);
                 break;
             case neutral:
                 wiper_value = 128;
@@ -259,7 +262,7 @@ void sdrive_enable_task(void *arg) {
     while (1) {
         if (control.sdrive_enable != sdrive_enabled) {
             sdrive_enabled = control.sdrive_enable;
-            if (sdrive_enabled &! control.drive_mode) {
+            if (sdrive_enabled) {
                 gpio_set_level(GPIO_NUM_5, 1); // Turn GPIO 5 ON
                 ESP_LOGI(TAG, "sdrive enabled, GPIO 5 ON");
             } else {
@@ -270,6 +273,50 @@ void sdrive_enable_task(void *arg) {
         
         vTaskDelay(pdMS_TO_TICKS(50)); // Delay for 100ms
     }
+}
+
+void adc_task(void *pvParameters)
+{
+    // ADC1 init
+    adc_oneshot_unit_handle_t adc1_handle;
+    adc_oneshot_unit_init_cfg_t init_config1 = {
+        .unit_id = ADC_UNIT_1,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+
+    // ADC1 config
+    adc_oneshot_chan_cfg_t config = {
+        .bitwidth = ADC_BITWIDTH_DEFAULT,
+        .atten = ADC_ATTEN_DB_11,
+    };
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_0, &config));
+
+    // Variables for ADC reading
+    int adc_raw = 0;
+    int voltage = 0;
+    sensor_data.battery_voltage = 0;
+
+    while (1) {
+        // Read ADC
+        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_0, &adc_raw));
+        
+        // Convert ADC reading to voltage (in mV)
+        voltage = (adc_raw * 3300) / 4095; // Assuming 12-bit ADC (4095) and 3.3V reference
+        
+        // Scale voltage by 10
+        sensor_data.battery_voltage = voltage / 100;
+
+        // Log the results
+        ESP_LOGI(TAG, "ADC Raw: %d", adc_raw);
+        ESP_LOGI(TAG, "Voltage: %d mV", voltage);
+        ESP_LOGI(TAG, "Scaled Voltage (x10): %d mV", sensor_data.battery_voltage);
+
+        // Delay for 1 second
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    // Cleanup (this part won't be reached in this example)
+    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
 }
 
 void app_main(void) {
@@ -295,18 +342,9 @@ void app_main(void) {
 
     xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
 
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
-    control.sdrive_enable = true;
-    control.drive_mode = forward;
-    control.throttle = 50;
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
-    control.drive_mode = resvere;
-    control.throttle = 50;
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
-    control.drive_mode = neutral;
-    control.sdrive_enable = false;
+    xTaskCreate(adc_task, "adc_task", 4096, NULL, 5, NULL);
 
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    //vTaskDelay(10000 / portTICK_PERIOD_MS);
     //test_can();
 
     

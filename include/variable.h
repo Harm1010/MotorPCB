@@ -37,6 +37,7 @@ typedef struct {
     mpu6050_gyro_value_t gyro;          
     mpu6050_temp_value_t temp;          // °C
     complimentary_angle_t angles;       // °
+    float battery_voltage;             // V
 } sensor_data_t;
 
 // Declare variables as external

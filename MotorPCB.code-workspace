@@ -4,5 +4,9 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.associations": {
+			"adc_cali_scheme.h": "c"
+		}
+	}
 }
