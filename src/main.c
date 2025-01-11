@@ -342,7 +342,7 @@ void app_main(void) {
 
     xTaskCreate(can_sensor_task, "can_sensor", 2048, NULL, 10, NULL);
 
-    xTaskCreate(adc_task, "adc_task", 4096, NULL, 5, NULL);
+    xTaskCreate(adc_task, "adc_task", 4096, NULL, 7, NULL);
 
     //vTaskDelay(10000 / portTICK_PERIOD_MS);
     //test_can();
