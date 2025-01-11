@@ -184,6 +184,7 @@ esp_err_t mcp4551_write(uint8_t i2c_address, uint8_t command, uint8_t value)
  * @brief mpu6050 task
  *
  * This task is used to read the mpu6050 data and print it.
+ * It continuously reads the accelerometer and gyroscope data, and
  */
 void mpu6050_task(void *arg) {
 
@@ -191,66 +192,78 @@ void mpu6050_task(void *arg) {
 
     while (1) {
         ESP_LOGI(TAG, "mpu6050 task");
+
         // Wait for the semaphore indicating data is ready
-        // Read accelerometer and gyroscope data
+        // Read accelerometer data
         ESP_ERROR_CHECK(mpu6050_get_acce(mpu6050, &sensor_data.acceleration));
         ESP_LOGI(TAG, "acce_x: %.2f, acce_y: %.2f, acce_z: %.2f",
              sensor_data.acceleration.acce_x,
              sensor_data.acceleration.acce_y,
              sensor_data.acceleration.acce_z);
 
+        // Read gyroscope data
         ESP_ERROR_CHECK(mpu6050_get_gyro(mpu6050, &sensor_data.gyro));
         ESP_LOGI(TAG, "gyro_x: %.2f, gyro_y: %.2f, gyro_z: %.2f",
              sensor_data.gyro.gyro_x,
              sensor_data.gyro.gyro_y,
              sensor_data.gyro.gyro_z);
 
-        // Optionally apply complementary filter
+        // calculate angles
         ESP_ERROR_CHECK(mpu6050_complimentory_filter(mpu6050, &sensor_data.acceleration, &sensor_data.gyro, &sensor_data.angles));
 
         ESP_LOGI(TAG, "roll: %.2f, pitch: %.2f", 
              sensor_data.angles.roll,
-             sensor_data.angles.pitch); 
-             
-             
+             sensor_data.angles.pitch);
+
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 
-   
+    /**
+     * @brief Complementary filter
+     *
+     * This function applies the complementary filter to the data read from the
+     * accelerometer and gyroscope. It returns the filtered roll and pitch angles.
+     */
 }
 
 
 /**
  * @brief mcp4551 task
  *
- * This task is used to send control value to MCP4551.
+ * This task is used to send control value to MCP4551 (digital potentiometer).
+ * It adjusts the wiper value based on the throttle and drive mode.
  */
 void mcp4551_task(void *arg) { 
-    
-    uint8_t wiper_value = 128;
-    control.drive_mode = neutral;
+    uint8_t wiper_value = 128; // Initial wiper value at midpoint
+    control.drive_mode = neutral; // Initialize drive mode to neutral
 
     while (1) {
-
-
+        // Limit throttle to a maximum value of 0xDC
         if(control.throttle > 0xDC){
             control.throttle = 0xDC;
         }
 
+        // Determine wiper value based on drive mode and throttle
         switch (control.drive_mode) {
-
             case forward:
+                // Increase wiper value for forward direction
                 wiper_value = 127 + (control.throttle / 2);
                 break;
             case resvere:
+                // Decrease wiper value for reverse direction
                 wiper_value = 127 - (control.throttle / 2);
                 break;
             case neutral:
+                // Set wiper value to midpoint for neutral
                 wiper_value = 128;
                 break;
         }
+
+        // Write the calculated wiper value to the MCP4551 volatile wiper (digital potentiometer)
         mcp4551_write(MCP4551_I2C_ADDRESS, MCP4551_CMD_VOLATILE_WIPER, wiper_value);
-        vTaskDelay(200 / portTICK_PERIOD_MS);
+
+        // Delay for 100ms before the next iteration
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
 
@@ -300,7 +313,7 @@ void adc_task(void *pvParameters)
 
     // Variables for ADC reading
     int adc_raw = 0;
-    int voltage = 0;
+    float voltage = 0;
     sensor_data.battery_voltage = 0;
 
     while (1) {
@@ -308,15 +321,15 @@ void adc_task(void *pvParameters)
         ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, ADC_CHANNEL_0, &adc_raw));
         
         // Convert ADC reading to voltage (in mV)
-        voltage = (adc_raw * 3300) / 4095; // Assuming 12-bit ADC (4095) and 3.3V reference
+        voltage = (float)(adc_raw * 3300) / 4095.f; // Assuming 12-bit ADC (4095) and 3.3V reference
         
-        // Scale voltage by 10
-        sensor_data.battery_voltage = voltage / 100;
+        // Scale voltage by 10 for the resistor devider
+        sensor_data.battery_voltage = voltage / 100.f;
 
         // Log the results
         ESP_LOGI(TAG, "ADC Raw: %d", adc_raw);
-        ESP_LOGI(TAG, "Voltage: %d mV", voltage);
-        ESP_LOGI(TAG, "Scaled Voltage (x10): %f mV", sensor_data.battery_voltage);
+        ESP_LOGI(TAG, "Voltage: %f mV", voltage);
+        ESP_LOGI(TAG, "Scaled Voltage: %f mV", sensor_data.battery_voltage);
 
         // Delay for 1 second
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -340,7 +353,7 @@ void app_main(void) {
     gpio_set_level(GPIO_NUM_10, 0); // Turn GPIO 10 OFF
     
     i2c_bus_init();
-    // Create the task
+    // Create the tasks
     xTaskCreate(mpu6050_task, "mpu6050_task", 2048, NULL, 8, NULL);
 
     xTaskCreate(sdrive_enable_task, "sdrive_enable_task", 2048, NULL, 9, NULL);
@@ -353,7 +366,5 @@ void app_main(void) {
 
     //vTaskDelay(10000 / portTICK_PERIOD_MS);
     //test_can();
-
-    
 
 }

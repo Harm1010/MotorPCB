@@ -62,8 +62,7 @@ static SemaphoreHandle_t stop_ping_sem;
 static SemaphoreHandle_t ctrl_task_sem;
 static SemaphoreHandle_t done_sem;
 
-
-
+// TWAI messages
 static const twai_message_t ping_message = {
     // Message type and format settings
     .extd = 0,              // Standard Format message (11-bit ID)
