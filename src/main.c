@@ -231,12 +231,19 @@ void mcp4551_task(void *arg) {
     control.drive_mode = neutral;
 
     while (1) {
+
+
+        if(control.throttle > 0xDC){
+            control.throttle = 0xDC;
+        }
+
         switch (control.drive_mode) {
+
             case forward:
-                wiper_value = 128 + (control.throttle / 2);
+                wiper_value = 127 + (control.throttle / 2);
                 break;
             case resvere:
-                wiper_value = 128 - (control.throttle / 2);
+                wiper_value = 127 - (control.throttle / 2);
                 break;
             case neutral:
                 wiper_value = 128;
@@ -262,7 +269,7 @@ void sdrive_enable_task(void *arg) {
     while (1) {
         if (control.sdrive_enable != sdrive_enabled) {
             sdrive_enabled = control.sdrive_enable;
-            if (sdrive_enabled) {
+            if (sdrive_enabled &! control.drive_mode) {
                 gpio_set_level(GPIO_NUM_5, 1); // Turn GPIO 5 ON
                 ESP_LOGI(TAG, "sdrive enabled, GPIO 5 ON");
             } else {
@@ -309,7 +316,7 @@ void adc_task(void *pvParameters)
         // Log the results
         ESP_LOGI(TAG, "ADC Raw: %d", adc_raw);
         ESP_LOGI(TAG, "Voltage: %d mV", voltage);
-        ESP_LOGI(TAG, "Scaled Voltage (x10): %d mV", sensor_data.battery_voltage);
+        ESP_LOGI(TAG, "Scaled Voltage (x10): %f mV", sensor_data.battery_voltage);
 
         // Delay for 1 second
         vTaskDelay(pdMS_TO_TICKS(2000));
