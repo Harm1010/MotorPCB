@@ -51,10 +51,10 @@
 #define TAG "CAN_SENSOR"
 
 // CAN message IDs
-#define ID_CONTROL_MSG         0x123   // Incoming control messages
-#define ID_MPU_ACCEL_MSG       0x234   // Outgoing accelerometer data
-#define ID_MPU_GYRO_MSG        0x235   // Outgoing gyroscope data
-#define ID_MPU_ANGLE_MSG       0x236   // Outgoing filtered angle data
+#define ID_CONTROL_MSG         0x103   // Incoming control messages
+#define ID_MPU_ACCEL_MSG       0x204   // Outgoing accelerometer data
+#define ID_MPU_GYRO_MSG        0x205   // Outgoing gyroscope data
+#define ID_MPU_ANGLE_MSG       0x206   // Outgoing filtered angle data
 
 static QueueHandle_t tx_task_queue;
 static QueueHandle_t rx_task_queue;
@@ -231,8 +231,8 @@ void twai_control_task(void *arg)
 void can_sensor_task(void *arg)
 {   
 
-    twai_message_t rx_msg;
-    twai_message_t tx_msg;
+    twai_message_t rx_msg = {0};
+    twai_message_t tx_msg = {0};
     
     ESP_ERROR_CHECK(twai_driver_install(&g_config, &t_config, &f_config));
     ESP_ERROR_CHECK(twai_start());
@@ -252,18 +252,13 @@ void can_sensor_task(void *arg)
             }
         }
 
-        static uint32_t last_send_time = 0;
-        uint32_t curr_time = xTaskGetTickCount();
+        static long last_send_time = 0;
+        long curr_time = xTaskGetTickCount();
         if ((curr_time - last_send_time) >= 1000) {
             last_send_time = curr_time;
 
             // Send accelerometer data
             tx_msg.identifier = ID_MPU_ACCEL_MSG;
-            tx_msg.extd = 0;
-            tx_msg.rtr = 0;
-            tx_msg.ss = 0;
-            tx_msg.self = 0;
-            tx_msg.dlc_non_comp = 0;
             tx_msg.data_length_code = 6;
             
             // Pack accelerometer data (2 bytes each for x, y, z)
@@ -350,3 +345,4 @@ void test_can(void) {
     vSemaphoreDelete(stop_ping_sem);
     vSemaphoreDelete(done_sem);
 }
+
