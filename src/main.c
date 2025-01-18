@@ -33,7 +33,7 @@
 static const char *TAG = "mpu6050 test";
 static mpu6050_handle_t mpu6050 = NULL;
 
-// Define and initialize the global variables
+// Define and initialize the global variable structs.
 control_t control = {
     .drive_mode = neutral,
     .throttle = 0,
@@ -64,16 +64,22 @@ sensor_data_t sensor_data = {
 
 
 
+/**
+ * @brief Initializes the I2C bus
+ *
+ * This function is used to configure the I2C bus and install the driver.
+ */
 static void i2c_bus_init(void) {
 
     ESP_LOGI(TAG, "Configuring I2C bus...");
+
     i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = I2C_MASTER_SDA_IO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_io_num = I2C_MASTER_SCL_IO,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ
+        .mode = I2C_MODE_MASTER,  /*!< I2C mode: master or slave */
+        .sda_io_num = I2C_MASTER_SDA_IO,  /*!< GPIO number for I2C data signal */
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,  /*!< Enable internal pull-up on SDA line */
+        .scl_io_num = I2C_MASTER_SCL_IO,  /*!< GPIO number for I2C clock signal */
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,  /*!< Enable internal pull-up on SCL line */
+        .master.clk_speed = I2C_MASTER_FREQ_HZ  /*!< I2C master clock frequency */
     };
 
     esp_err_t ret = i2c_param_config(I2C_MASTER_NUM, &conf);
@@ -124,8 +130,26 @@ static void i2c_sensor_mpu6050_init(void) {
 }
 
 
+/**
+ * @brief Writes a value to the specified MCP4551 register
+ *
+ * This function is used to send a command and value to the MCP4551
+ * digital potentiometer. It creates an I2C command link, sends the
+ * device address with write flag, command byte, and data byte, and
+ * then stops the I2C communication. It also executes the command link
+ * and deletes the command link when finished.
+ *
+ * @param i2c_address The I2C address of the MCP4551 device
+ * @param command The command byte to send to the device, including
+ *                the memory address and operation
+ * @param value The data byte to send to the device (wiper value)
+ *
+ * @return ESP_OK if the function completed successfully, otherwise
+ *         an error code from the ESP-IDF
+ */
 esp_err_t mcp4551_write(uint8_t i2c_address, uint8_t command, uint8_t value)
 {
+    // Create an I2C command link
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     esp_err_t ret;
 
@@ -267,8 +291,15 @@ void mcp4551_task(void *arg) {
     }
 }
 
+/**
+ * @brief sdrive enable task
+ *
+ * This task is responsible for enabling/disabling the sdrive based on the
+ * sdrive enable flag in the control struct. It also sets the GPIO 5 pin to
+ * reflect the state of the sdrive.
+ */
 void sdrive_enable_task(void *arg) {
-    bool sdrive_enabled = false;
+
     // Configure GPIO 5 as output
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << 5),
@@ -280,23 +311,36 @@ void sdrive_enable_task(void *arg) {
     gpio_config(&io_conf);
 
     while (1) {
-        if (control.sdrive_enable != sdrive_enabled) {
-            sdrive_enabled = control.sdrive_enable;
-            if (sdrive_enabled &! control.drive_mode) {
+            
+            if (control.sdrive_enable) {
                 gpio_set_level(GPIO_NUM_5, 1); // Turn GPIO 5 ON
                 ESP_LOGI(TAG, "sdrive enabled, GPIO 5 ON");
             } else {
                 gpio_set_level(GPIO_NUM_5, 0); // Turn GPIO 5 OFF
                 ESP_LOGI(TAG, "sdrive disabled, GPIO 5 OFF");
             }
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(50)); // Delay for 100ms
+
+
+        // Delay for 100ms before the next iteration
+        vTaskDelay(pdMS_TO_TICKS(60));
     }
 }
 
+/**
+ * @brief Task to read ADC data and convert it to voltage
+ *
+ * This task reads data from the ADC1 unit on the ESP32 and converts the
+ * raw data to a voltage value. The voltage is then scaled by 10 for the
+ * resistor divider. The results are logged to the console.
+ */
 void adc_task(void *pvParameters)
 {
+
+    // Variables for ADC reading
+    int adc_raw = 0;
+    float voltage = 0;
+    sensor_data.battery_voltage = 0;
+
     // ADC1 init
     adc_oneshot_unit_handle_t adc1_handle;
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -311,10 +355,6 @@ void adc_task(void *pvParameters)
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_0, &config));
 
-    // Variables for ADC reading
-    int adc_raw = 0;
-    float voltage = 0;
-    sensor_data.battery_voltage = 0;
 
     while (1) {
         // Read ADC
@@ -341,7 +381,7 @@ void adc_task(void *pvParameters)
 
 void app_main(void) {
 
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     gpio_config_t io_conf2 = {
         .pin_bit_mask = (1ULL << 10),
         .mode = GPIO_MODE_OUTPUT,

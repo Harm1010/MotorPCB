@@ -33,7 +33,7 @@
 #define ID_SLAVE_DATA           0x0B1
 #define ID_SLAVE_PING_RESP      0x0B2
 
-static const twai_timing_config_t t_config = TWAI_TIMING_CONFIG_50KBITS();
+static const twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
 static const twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 static const twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT_V2(0, TX_GPIO_NUM, RX_GPIO_NUM, TWAI_MODE_NORMAL);
 
